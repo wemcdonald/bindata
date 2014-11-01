@@ -50,8 +50,12 @@ describe BinData::Registry do
     r.underscore_name('XYZCamelCase').must_equal 'xyz_camel_case'
   end
 
-  it "ignores the outer nestings of classes" do
-    r.underscore_name('A::B::C').must_equal 'c'
+  it "strips off BinData:: from classes" do
+    r.underscore_name('BinData::C').must_equal 'c'
+  end
+
+  it "preserves namespaces of classes" do
+    r.underscore_name('A::B::C').must_equal 'a_b_c'
   end
 end
 
@@ -118,7 +122,7 @@ describe BinData::Registry, "with endian specific types" do
     r.register('a_le', A)
     r.register('b_be', B)
   end
-  
+
   it "lookup little endian types" do
     r.lookup('a', :little).must_equal A
   end

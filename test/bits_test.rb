@@ -218,4 +218,23 @@ describe "Bits of size 1" do
       obj.must_equal 0
     end
   end
+
+  describe ".to_bool" do
+    it "returns true when 1" do
+      bit_classes.each do |bit_class|
+        obj = bit_class.new
+        obj.assign(1)
+        obj.to_bool.must_equal true
+      end
+    end
+
+    it "returns true when 0" do
+      bit_classes.each do |bit_class|
+        obj = bit_class.new
+        obj.assign(0)
+        obj.to_bool.must_equal false
+      end
+    end
+
+  end
 end

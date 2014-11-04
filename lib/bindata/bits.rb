@@ -40,6 +40,11 @@ module BinData
             #{create_do_num_bytes_code(nbits)}
           end
 
+          def to_bool
+            raise "to_bool is only valid on bit1" unless #{nbits} == 1
+            value == 1
+          end
+
           #---------------
           private
 
@@ -103,7 +108,7 @@ module BinData
 
       def create_fixed_clamp_code(nbits, signed)
         if nbits == 1 and signed == :signed
-          raise "signed bitfield must have more than one bit" 
+          raise "signed bitfield must have more than one bit"
         end
 
         if signed == :signed

@@ -1,10 +1,67 @@
 = BinData Changelog
 
-== Version 2.x.x (2014-xx-xx)
+== Version 2.4.4 (2018-10-03)
+
+* Display a hint when endian is omitted.  Requested by Tails.
+* Add thread safety to Integer/BitField creation.  Requested by jbpeirce.
+* Ensure windows sockets are unseekable.  Thanks to Brent Cook.
+
+== Version 2.4.3 (2018-03-10)
+
+* Add Uint8Arrays.  Requested by masarakki.
+
+== Version 2.4.2 (2018-01-31)
+
+* Allow boolean values as parameters.  Requested by Patrik Wenger.
+
+== Version 2.4.1 (2017-08-30)
+
+* Fix crash with String :length invoking :rel_offset.  Reported by Claudius
+  Coenen.
+
+== Version 2.4.0 (2017-04-09)
+
+* Reworked internal sanitizing API.
+* Fix bit-based integers inside buffers.  Reported by Claudius Coenen.
+
+== Version 2.3.5 (2017-01-19)
+
+* Enforce Integer#nbits > 0.  Reported by Keenan Tims.
+* Fix auto_call_delayed_io crash.  Reported by Michael Petter.
+
+== Version 2.3.4 (2016-10-17)
+
+* Memoize dynamic methods for primitives.  Thanks to hiroeorz.
+
+== Version 2.3.3 (2016-09-07)
+
+* Fix bug #80.  Thanks to Michael Petter.
+* Add Buffer#raw_num_bytes.
+
+== Version 2.3.2 (2016-09-02)
+
+* IO#num_bytes_remaining now works inside Buffers.
+* Added ability to skip to arbitrary byte patterns.  Requested by Stefan Kolb.
+
+== Version 2.3.1 (2016-06-17)
+
+* Improve list of reserved words.  Thanks to Claudius Coenen.
+* Fix virtual fields to be bit aligned.  Thanks to hopesea.
+
+== Version 2.3.0 (2016-03-25)
+
+* Add :to_abs_offset to Skip.
+* Added backwards seeking via multi pass I/O.  See DelayedIO.
+* Removed #offset, which was deprecated in 2.1.0.
+* Removed :adjust_offset.  See NEWS.rdoc for details.
+
+== Version 2.2.0 (2016-01-30)
 
 * Warn if String has :value but no :read_length.  Requested by Michael
   Genereux.
 * Prevent running under Ruby 2.1.0p0 due to ruby bug 44525.
+* Added #to_hex convenience method.  Thanks to Gregory Romé.
+* Added namespacing via search_prefix. Requested by sumofparts.
 
 == Version 2.1.0 (2014-04-16)
 

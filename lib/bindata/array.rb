@@ -8,22 +8,22 @@ module BinData
   #
   #   data = "\x03\x04\x05\x06\x07\x08\x09"
   #
-  #   obj = BinData::Array.new(:type => :int8, :initial_length => 6)
+  #   obj = BinData::Array.new(type: :int8, initial_length: 6)
   #   obj.read(data) #=> [3, 4, 5, 6, 7, 8]
   #
-  #   obj = BinData::Array.new(:type => :int8,
-  #                            :read_until => lambda { index == 1 })
+  #   obj = BinData::Array.new(type: :int8,
+  #                            read_until: -> { index == 1 })
   #   obj.read(data) #=> [3, 4]
   #
-  #   obj = BinData::Array.new(:type => :int8,
-  #                            :read_until => lambda { element >= 6 })
+  #   obj = BinData::Array.new(type: :int8,
+  #                            read_until: -> { element >= 6 })
   #   obj.read(data) #=> [3, 4, 5, 6]
   #
-  #   obj = BinData::Array.new(:type => :int8,
-  #           :read_until => lambda { array[index] + array[index - 1] == 13 })
+  #   obj = BinData::Array.new(type: :int8,
+  #           read_until: -> { array[index] + array[index - 1] == 13 })
   #   obj.read(data) #=> [3, 4, 5, 6, 7]
   #
-  #   obj = BinData::Array.new(:type => :int8, :read_until => :eof)
+  #   obj = BinData::Array.new(type: :int8, read_until: :eof)
   #   obj.read(data) #=> [3, 4, 5, 6, 7, 8, 9]
   #
   # == Parameters
@@ -76,7 +76,7 @@ module BinData
     end
 
     def clear?
-      @element_list.nil? or elements.all? { |el| el.clear? }
+      @element_list.nil? || elements.all?(&:clear?)
     end
 
     def assign(array)
@@ -86,13 +86,13 @@ module BinData
     end
 
     def snapshot
-      elements.collect { |el| el.snapshot }
+      elements.collect(&:snapshot)
     end
 
     def find_index(obj)
       elements.index(obj)
     end
-    alias_method :index, :find_index
+    alias index find_index
 
     # Returns the first index of +obj+ in self.
     #
@@ -105,7 +105,7 @@ module BinData
       insert(-1, *args)
       self
     end
-    alias_method :<<, :push
+    alias << push
 
     def unshift(*args)
       insert(0, *args)
@@ -125,18 +125,18 @@ module BinData
 
     # Returns the element at +index+.
     def [](arg1, arg2 = nil)
-      if arg1.respond_to?(:to_int) and arg2.nil?
+      if arg1.respond_to?(:to_int) && arg2.nil?
         slice_index(arg1.to_int)
-      elsif arg1.respond_to?(:to_int) and arg2.respond_to?(:to_int)
+      elsif arg1.respond_to?(:to_int) && arg2.respond_to?(:to_int)
         slice_start_length(arg1.to_int, arg2.to_int)
-      elsif arg1.is_a?(Range) and arg2.nil?
+      elsif arg1.is_a?(Range) && arg2.nil?
         slice_range(arg1)
       else
         raise TypeError, "can't convert #{arg1} into Integer" unless arg1.respond_to?(:to_int)
         raise TypeError, "can't convert #{arg2} into Integer" unless arg2.respond_to?(:to_int)
       end
     end
-    alias_method :slice, :[]
+    alias slice []
 
     def slice_index(index)
       extend_array(index)
@@ -168,7 +168,7 @@ module BinData
     # If the array is empty, the first form returns nil, and the second
     # form returns an empty array.
     def first(n = nil)
-      if n.nil? and empty?
+      if n.nil? && empty?
         # explicitly return nil as arrays grow automatically
         nil
       elsif n.nil?
@@ -193,7 +193,7 @@ module BinData
     def length
       elements.length
     end
-    alias_method :size, :length
+    alias size length
 
     def empty?
       length.zero?
@@ -217,7 +217,7 @@ module BinData
       index = find_index_of(child)
       sum = sum_num_bytes_below_index(index)
 
-      child.do_num_bytes.is_a?(Integer) ? sum.ceil : sum.floor
+      child.bit_aligned? ? sum.floor : sum.ceil
     end
 
     def do_write(io) #:nodoc:
@@ -275,21 +275,17 @@ module BinData
 
   class ArrayArgProcessor < BaseArgProcessor
     def sanitize_parameters!(obj_class, params) #:nodoc:
-      unless params.has_parameter?(:initial_length) or
-               params.has_parameter?(:read_until)
-        # ensure one of :initial_length and :read_until exists
+      # ensure one of :initial_length and :read_until exists
+      unless params.has_at_least_one_of?(:initial_length, :read_until)
         params[:initial_length] = 0
       end
 
+      params.warn_replacement_parameter(:length, :initial_length)
       params.warn_replacement_parameter(:read_length, :initial_length)
-      params.must_be_integer(:initial_length, :read_length)
+      params.must_be_integer(:initial_length)
 
       params.merge!(obj_class.dsl_params)
-
-      if params.needs_sanitizing?(:type)
-        el_type, el_params = params[:type]
-        params[:type] = params.create_sanitized_object_prototype(el_type, el_params)
-      end
+      params.sanitize_object_prototype(:type)
     end
   end
 
@@ -299,15 +295,13 @@ module BinData
       loop do
         element = append_new_element
         element.do_read(io)
-        variables = { :index => self.length - 1, :element => self.last,
-                      :array => self }
+        variables = { index: self.length - 1, element: self.last, array: self }
         break if eval_parameter(:read_until, variables)
       end
     end
-
   end
 
-  # Logic for the :read_until => :eof parameter
+  # Logic for the read_until: :eof parameter
   module ReadUntilEOFPlugin
     def do_read(io)
       loop do

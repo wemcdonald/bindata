@@ -9,12 +9,12 @@ module BinData
   #
   #   require 'bindata'
   #
-  #   obj = BinData::Buffer.new(:length => 5, :type => [:string, {:value => "abc"}])
+  #   obj = BinData::Buffer.new(length: 5, type: [:string, {value: "abc"}])
   #   obj.to_binary_s #=> "abc\000\000"
   #
   #
   #   class MyBuffer < BinData::Buffer
-  #     default_parameter :length => 8
+  #     default_parameter length: 8
   #
   #     endian :little
   #
@@ -26,6 +26,7 @@ module BinData
   #   obj = MyBuffer.read("\001\000\002\000\000\000\000\000")
   #   obj.num1 #=> 1
   #   obj.num1 #=> 2
+  #   obj.raw_num_bytes #=> 4
   #   obj.num_bytes #=> 8
   #
   #
@@ -33,10 +34,10 @@ module BinData
   #     endian :little
   #
   #     uint16 :table_size_in_bytes
-  #     buffer :strings, :length => :table_size_in_bytes do
-  #       array :read_until => :eof do
+  #     buffer :strings, length: :table_size_in_bytes do
+  #       array read_until: :eof do
   #         uint8 :len
-  #         string :str, :length => :len
+  #         string :str, length: :len
   #       end
   #     end
   #   end
@@ -62,6 +63,11 @@ module BinData
       @type = get_parameter(:type).instantiate(nil, self)
     end
 
+    # The number of bytes used, ignoring the padding imposed by the buffer.
+    def raw_num_bytes
+      @type.num_bytes
+    end
+
     def clear?
       @type.clear?
     end
@@ -76,10 +82,6 @@ module BinData
 
     def respond_to?(symbol, include_private = false) #:nodoc:
       @type.respond_to?(symbol, include_private) || super
-    end
-
-    def safe_respond_to?(symbol, include_private = false) #:nodoc:
-      base_respond_to?(symbol, include_private)
     end
 
     def method_missing(symbol, *args, &block) #:nodoc:
@@ -108,13 +110,8 @@ module BinData
 
     def sanitize_parameters!(obj_class, params)
       params.merge!(obj_class.dsl_params)
-
       params.must_be_integer(:length)
-
-      if params.needs_sanitizing?(:type)
-        el_type, el_params = params[:type]
-        params[:type] = params.create_sanitized_object_prototype(el_type, el_params)
-      end
+      params.sanitize_object_prototype(:type)
     end
   end
 end

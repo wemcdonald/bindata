@@ -37,7 +37,7 @@ module BinData
   #
   #     class MyRecord < BinData::Record
   #       bit4       :preamble
-  #       bit_string :str, :length => 2
+  #       bit_string :str, length: 2
   #     end
   #
   module BitAligned
@@ -46,13 +46,14 @@ module BinData
         @io = io
       end
       def readbytes(n)
-        n.times.inject("") do |bytes, i|
+        n.times.inject("") do |bytes, _|
           bytes << @io.readbits(8, :big).chr
         end
       end
-      def method_missing(sym, *args, &block)
-        @io.send(sym, *args, &block)
-      end
+    end
+
+    def bit_aligned?
+      true
     end
 
     def read_and_return_value(io)

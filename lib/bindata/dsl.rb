@@ -1,7 +1,7 @@
 module BinData
   # Extracts args for Records and Buffers.
   #
-  # Foo.new(:bar => "baz) is ambiguous as to whether :bar is a value or parameter.
+  # Foo.new(bar: "baz) is ambiguous as to whether :bar is a value or parameter.
   #
   # BaseArgExtractor always assumes :bar is parameter.  This extractor correctly
   # identifies it as value or parameter.
@@ -18,7 +18,7 @@ module BinData
     end
 
     def parameters_is_value?(obj_class, value, parameters)
-      if value.nil? and parameters.length > 0
+      if value.nil? && !parameters.empty?
         field_names_in_parameters?(obj_class, parameters)
       else
         false
@@ -29,18 +29,17 @@ module BinData
       field_names = obj_class.fields.field_names
       param_keys = parameters.keys
 
-      (field_names & param_keys).length > 0
+      !(field_names & param_keys).empty?
     end
   end
 
   # BinData classes that are part of the DSL must be extended by this.
   module DSLMixin
     def dsl_parser(parser_type = nil)
-      unless defined? @dsl_parser
-        parser_type = superclass.dsl_parser.parser_type if parser_type.nil?
-        @dsl_parser = DSLParser.new(self, parser_type)
+      @dsl_parser ||= begin
+        parser_type ||= superclass.dsl_parser.parser_type
+        DSLParser.new(self, parser_type)
       end
-      @dsl_parser
     end
 
     def method_missing(symbol, *args, &block) #:nodoc:
@@ -67,7 +66,6 @@ module BinData
         @the_class      = the_class
         @parser_type    = parser_type
         @validator      = DSLFieldValidator.new(the_class, self)
-        @endian_handler = DSLBigAndLittleEndianHandler.new(the_class)
         @endian         = nil
       end
 
@@ -77,45 +75,49 @@ module BinData
         if endian
           set_endian(endian)
         elsif @endian.nil?
-          pendian = parent_attribute(:endian, nil)
-          set_endian(pendian) if pendian
+          set_endian(parent_attribute(:endian))
         end
         @endian
       end
 
-      def hide(*args)
-        if option?(:hidden_fields)
-          hidden = args.collect { |name| name.to_sym }
+      def search_prefix(*args)
+        @search_prefix ||= parent_attribute(:search_prefix, []).dup
 
-          unless defined? @hide
-            @hide = parent_attribute(:hide, []).dup
+        prefix = args.collect(&:to_sym).compact
+        unless prefix.empty?
+          if fields?
+            dsl_raise SyntaxError, "search_prefix must be called before defining fields"
           end
 
-          @hide.concat(hidden.compact)
+          @search_prefix = prefix.concat(@search_prefix)
+        end
+
+        @search_prefix
+      end
+
+      def hide(*args)
+        if option?(:hidden_fields)
+          @hide ||= parent_attribute(:hide, []).dup
+
+          hidden = args.collect(&:to_sym).compact
+          @hide.concat(hidden)
+
           @hide
         end
       end
 
       def fields
-        unless defined? @fields
-          fields = @endian_handler.ancestor_fields || parent_attribute(:fields)
-          @fields = SanitizedFields.new(endian)
-          @fields.copy_fields(fields) if fields
-        end
-
-        @fields
+        @fields ||= SanitizedFields.new(hints, parent_fields)
       end
 
       def dsl_params
-        send(parser_abilities[@parser_type].at(0))
+        abilities = parser_abilities[@parser_type]
+        send(abilities.at(0), abilities.at(1))
       end
 
       def method_missing(*args, &block)
-        if endian == :big_and_little
-          @endian_handler.forward_field_definition(*args, &block)
-        else
-          parse_and_append_field(*args, &block)
-        end
+        ensure_hints
+        parse_and_append_field(*args, &block)
       end
 
       #-------------
@@ -123,53 +125,60 @@ module BinData
 
       def parser_abilities
         @abilities ||= {
-          :struct    => [:to_struct_params, [:multiple_fields, :optional_fieldnames, :hidden_fields]],
-          :array     => [:to_array_params,  [:multiple_fields, :optional_fieldnames]],
-          :buffer    => [:to_array_params,  [:multiple_fields, :optional_fieldnames]],
-          :choice    => [:to_choice_params, [:multiple_fields, :all_or_none_fieldnames, :fieldnames_are_values]],
-          :primitive => [:to_struct_params, [:multiple_fields, :optional_fieldnames]]
+          struct:     [:to_struct_params, :struct,      [:multiple_fields, :optional_fieldnames, :hidden_fields]],
+          array:      [:to_object_params, :type,        [:multiple_fields, :optional_fieldnames]],
+          buffer:     [:to_object_params, :type,        [:multiple_fields, :optional_fieldnames, :hidden_fields]],
+          choice:     [:to_choice_params, :choices,     [:multiple_fields, :all_or_none_fieldnames, :fieldnames_are_values]],
+          delayed_io: [:to_object_params, :type,        [:multiple_fields, :optional_fieldnames, :hidden_fields]],
+          primitive:  [:to_struct_params, :struct,      [:multiple_fields, :optional_fieldnames]],
+          skip:       [:to_object_params, :until_valid, [:multiple_fields, :optional_fieldnames]],
         }
       end
 
       def option?(opt)
-        parser_abilities[@parser_type].at(1).include?(opt)
+        parser_abilities[@parser_type].at(2).include?(opt)
+      end
+
+      def ensure_hints
+        endian
+        search_prefix
+      end
+
+      def hints
+        { endian: endian, search_prefix: search_prefix }
       end
 
       def set_endian(endian)
-        if has_fields?
-          dsl_raise SyntaxError, "endian must not be called after defining fields"
-        end
-        if not valid_endian?(endian)
-          dsl_raise ArgumentError, "unknown value for endian '#{endian}'"
-        end
+        if endian
+          if fields?
+            dsl_raise SyntaxError, "endian must be called before defining fields"
+          end
+          if !valid_endian?(endian)
+            dsl_raise ArgumentError, "unknown value for endian '#{endian}'"
+          end
 
-        if endian == :big_and_little
-          @endian_handler.prepare_subclasses
+          if endian == :big_and_little
+            DSLBigAndLittleEndianHandler.handle(@the_class)
+          end
+
+          @endian = endian
         end
-
-        @endian = endian
-      end
-
-      def has_fields?
-        @fields && @fields.length > 0
       end
 
       def valid_endian?(endian)
         [:big, :little, :big_and_little].include?(endian)
       end
 
-      def parent_attribute(attr, default = nil)
-        parent = @the_class.superclass
-        parser = parent.respond_to?(:dsl_parser) ? parent.dsl_parser : nil
-        if parser and parser.respond_to?(attr)
-          parser.send(attr)
-        else
-          default
-        end
+      def parent_fields
+        parent_attribute(:fields)
+      end
+
+      def fields?
+        defined?(@fields) && !@fields.empty?
       end
 
       def parse_and_append_field(*args, &block)
-        parser = DSLFieldParser.new(endian, *args, &block)
+        parser = DSLFieldParser.new(hints, *args, &block)
         begin
           @validator.validate_field(parser.name)
           append_field(parser.type, parser.name, parser.params)
@@ -184,42 +193,55 @@ module BinData
         raise TypeError, "unknown type '#{err.message}'"
       end
 
-      def dsl_raise(exception, message)
+      def parent_attribute(attr, default = nil)
+        parent = @the_class.superclass
+        parser = parent.respond_to?(:dsl_parser) ? parent.dsl_parser : nil
+        if parser && parser.respond_to?(attr)
+          parser.send(attr)
+        else
+          default
+        end
+      end
+
+      def dsl_raise(exception, msg)
         backtrace = caller
         backtrace.shift while %r{bindata/dsl.rb} =~ backtrace.first
 
-        raise exception, message + " in #{@the_class}", backtrace
+        raise exception, "#{msg} in #{@the_class}", backtrace
       end
 
-      def to_array_params
+      def to_object_params(key)
         case fields.length
         when 0
           {}
         when 1
-          {:type => fields[0].prototype}
+          {key => fields[0].prototype}
         else
-          {:type => [:struct, to_struct_params]}
+          {key=> [:struct, to_struct_params]}
         end
       end
 
-      def to_choice_params
-        if fields.length == 0
+      def to_choice_params(key)
+        if fields.empty?
           {}
         elsif fields.all_field_names_blank?
-          {:choices => fields.collect { |f| f.prototype }}
+          {key => fields.collect(&:prototype)}
         else
           choices = {}
           fields.each { |f| choices[f.name] = f.prototype }
-          {:choices => choices}
+          {key => choices}
         end
       end
 
-      def to_struct_params
-        result = {:fields => fields}
-        if not endian.nil?
+      def to_struct_params(*unused)
+        result = {fields: fields}
+        if !endian.nil?
           result[:endian] = endian
         end
-        if option?(:hidden_fields) and not hide.empty?
+        if !search_prefix.empty?
+          result[:search_prefix] = search_prefix
+        end
+        if option?(:hidden_fields) && !hide.empty?
           result[:hide] = hide
         end
 
@@ -231,87 +253,91 @@ module BinData
     # This option creates two subclasses, each handling
     # :big or :little endian.
     class DSLBigAndLittleEndianHandler
-      def initialize(the_class)
-        @the_class = the_class
-      end
-
-      def prepare_subclasses
-        create_subclasses_with_endian
-        make_class_abstract
-        override_new_in_class
-      end
-
-      def forward_field_definition(*args, &block)
-        class_with_endian(@the_class,    :big).send(*args, &block)
-        class_with_endian(@the_class, :little).send(*args, &block)
-      end
-
-      def ancestor_fields
-        if subclass_of_big_and_little_endian?
-          pparent = @the_class.superclass.superclass
-          ancestor_with_endian = class_with_endian(pparent, @the_class.endian)
-          obj_attribute(ancestor_with_endian, :fields)
-        else
-          nil
+      class << self
+        def handle(bnl_class)
+          make_class_abstract(bnl_class)
+          create_subclasses_with_endian(bnl_class)
+          override_new_in_class(bnl_class)
+          delegate_field_creation(bnl_class)
+          fixup_subclass_hierarchy(bnl_class)
         end
-      end
 
-      #-------------
-      private
+        def make_class_abstract(bnl_class)
+          bnl_class.send(:unregister_self)
+        end
 
-      def create_subclasses_with_endian
-        instance_eval "class ::#{@the_class}Be < ::#{@the_class}; endian :big; end"
-        instance_eval "class ::#{@the_class}Le < ::#{@the_class}; endian :little; end"
-      end
+        def create_subclasses_with_endian(bnl_class)
+          instance_eval "class ::#{bnl_class}Be < ::#{bnl_class}; endian :big; end"
+          instance_eval "class ::#{bnl_class}Le < ::#{bnl_class}; endian :little; end"
+        end
 
-      def make_class_abstract
-        @the_class.send(:unregister_self)
-      end
+        def override_new_in_class(bnl_class)
+          endian_classes = {
+            big:    class_with_endian(bnl_class, :big),
+            little: class_with_endian(bnl_class, :little),
+          }
+          bnl_class.define_singleton_method(:new) do |*args|
+            if self == bnl_class
+              _, options, _ = arg_processor.separate_args(self, args)
+              delegate = endian_classes[options[:endian]]
+              return delegate.new(*args) if delegate
+            end
 
-      def override_new_in_class
-        saved_class = @the_class
-        endian_classes = {
-          :big => class_with_endian(saved_class, :big),
-          :little => class_with_endian(saved_class, :little),
-        }
-        @the_class.define_singleton_method(:new) do |*args|
-          if self == saved_class
-            value, options, parent = arg_processor.separate_args(self, args)
-            delegate = endian_classes[options[:endian]]
-            return delegate.new(*args) if delegate
+            super(*args)
           end
-
-          super(*args)
         end
-      end
 
-      def subclass_of_big_and_little_endian?
-        parent  = @the_class.superclass
-        pparent = parent.superclass
+        def delegate_field_creation(bnl_class)
+          endian_classes = {
+            big:    class_with_endian(bnl_class, :big),
+            little: class_with_endian(bnl_class, :little),
+          }
 
-        obj_attribute(parent, :endian) == :big_and_little and
-        obj_attribute(pparent, :endian) == :big_and_little and
-        [:big, :little].include?(@the_class.endian)
-      end
+          parser = bnl_class.dsl_parser
+          parser.define_singleton_method(:parse_and_append_field) do |*args, &block|
+            endian_classes[:big].send(*args, &block)
+            endian_classes[:little].send(*args, &block)
+          end
+        end
 
-      def class_with_endian(class_name, endian)
-        RegisteredClasses.lookup(class_name, endian)
-      end
+        def fixup_subclass_hierarchy(bnl_class)
+          parent = bnl_class.superclass
+          if obj_attribute(parent, :endian) == :big_and_little
+            be_subclass = class_with_endian(bnl_class, :big)
+            be_parent   = class_with_endian(parent, :big)
+            be_fields   = obj_attribute(be_parent, :fields)
 
-      def obj_attribute(obj, attr, default = nil)
-        parser = obj.respond_to?(:dsl_parser) ? obj.dsl_parser : nil
-        if parser and parser.respond_to?(attr)
-          parser.send(attr)
-        else
-          default
+            le_subclass = class_with_endian(bnl_class, :little)
+            le_parent   = class_with_endian(parent, :little)
+            le_fields   = obj_attribute(le_parent, :fields)
+
+            be_subclass.dsl_parser.define_singleton_method(:parent_fields) do
+              be_fields
+            end
+            le_subclass.dsl_parser.define_singleton_method(:parent_fields) do
+              le_fields
+            end
+          end
+        end
+
+        def class_with_endian(class_name, endian)
+          hints = {
+            endian: endian,
+            search_prefix: class_name.dsl_parser.search_prefix,
+          }
+          RegisteredClasses.lookup(class_name, hints)
+        end
+
+        def obj_attribute(obj, attr)
+          obj.dsl_parser.send(attr)
         end
       end
     end
 
     # Extracts the details from a field declaration.
     class DSLFieldParser
-      def initialize(endian, symbol, *args, &block)
-        @endian = endian
+      def initialize(hints, symbol, *args, &block)
+        @hints  = hints
         @type   = symbol
         @name   = name_from_field_declaration(args)
         @params = params_from_field_declaration(args, &block)
@@ -320,8 +346,8 @@ module BinData
       attr_reader :type, :name, :params
 
       def name_from_field_declaration(args)
-        name, params = args
-        if name == "" or name.is_a?(Hash)
+        name, _ = args
+        if name == "" || name.is_a?(Hash)
           nil
         else
           name
@@ -347,15 +373,18 @@ module BinData
 
       def params_from_block(&block)
         bindata_classes = {
-          :array  => BinData::Array,
-          :buffer => BinData::Buffer,
-          :choice => BinData::Choice,
-          :struct => BinData::Struct
+          array:      BinData::Array,
+          buffer:     BinData::Buffer,
+          choice:     BinData::Choice,
+          delayed_io: BinData::DelayedIO,
+          skip:       BinData::Skip,
+          struct:     BinData::Struct,
         }
 
         if bindata_classes.include?(@type)
           parser = DSLParser.new(bindata_classes[@type], @type)
-          parser.endian(@endian)
+          parser.endian(@hints[:endian])
+          parser.search_prefix(*@hints[:search_prefix])
           parser.instance_eval(&block)
 
           parser.dsl_params
@@ -389,7 +418,7 @@ module BinData
       end
 
       def ensure_valid_name(name)
-        if name and not option?(:fieldnames_are_values)
+        if name && !option?(:fieldnames_are_values)
           if malformed_name?(name)
             raise NameError.new("", name), "field '#{name}' is an illegal fieldname"
           end
@@ -409,19 +438,19 @@ module BinData
       end
 
       def must_not_have_a_name_failed?(name)
-        option?(:no_fieldnames) and name != nil
+        option?(:no_fieldnames) && !name.nil?
       end
 
       def must_have_a_name_failed?(name)
-        option?(:mandatory_fieldnames) and name.nil?
+        option?(:mandatory_fieldnames) && name.nil?
       end
 
       def all_or_none_names_failed?(name)
-        if option?(:all_or_none_fieldnames) and not fields.empty?
+        if option?(:all_or_none_fieldnames) && !fields.empty?
           all_names_blank = fields.all_field_names_blank?
           no_names_blank = fields.no_field_names_blank?
 
-          (name != nil and all_names_blank) or (name == nil and no_names_blank)
+          (!name.nil? && all_names_blank) || (name.nil? && no_names_blank)
         else
           false
         end
@@ -432,7 +461,7 @@ module BinData
       end
 
       def duplicate_name?(name)
-        fields.has_field_name?(name)
+        fields.field_name?(name)
       end
 
       def name_shadows_method?(name)

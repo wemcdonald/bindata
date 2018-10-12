@@ -8,22 +8,22 @@ module BinData
   #
   #   require 'bindata'
   #
-  #   obj = BinData::Uint8.new(:initial_value => 42)
+  #   obj = BinData::Uint8.new(initial_value: 42)
   #   obj #=> 42
   #   obj.assign(5)
   #   obj #=> 5
   #   obj.clear
   #   obj #=> 42
   #
-  #   obj = BinData::Uint8.new(:value => 42)
+  #   obj = BinData::Uint8.new(value: 42)
   #   obj #=> 42
   #   obj.assign(5)
   #   obj #=> 42
   #
-  #   obj = BinData::Uint8.new(:assert_value => 3)
+  #   obj = BinData::Uint8.new(assert: 3)
   #   obj.read("\005") #=> BinData::ValidityError: value is '5' but expected '3'
   #
-  #   obj = BinData::Uint8.new(:assert_value => lambda { value < 5 })
+  #   obj = BinData::Uint8.new(assert: -> { value < 5 })
   #   obj.read("\007") #=> BinData::ValidityError: value not as expected
   #
   # == Parameters
@@ -44,7 +44,7 @@ module BinData
   #                            parameter.  A boolean return indicates success
   #                            or failure.  Any other return is compared to
   #                            the value just read in.
-  # [<tt>:asserted_value</tt>] Equavalent to <tt>:assert</tt> and <tt>:value</tt>.
+  # [<tt>:asserted_value</tt>] Equivalent to <tt>:assert</tt> and <tt>:value</tt>.
   #
   class BasePrimitive < BinData::Base
     unregister_self
@@ -73,12 +73,13 @@ module BinData
       raise ArgumentError, "can't set a nil value for #{debug_name}" if val.nil?
 
       raw_val = val.respond_to?(:snapshot) ? val.snapshot : val
-      @value = begin
-                 raw_val.dup
-               rescue TypeError
-                 # can't dup Fixnums
-                 raw_val
-               end
+      @value =
+        begin
+          raw_val.dup
+        rescue TypeError
+          # can't dup Fixnums
+          raw_val
+        end
     end
 
     def snapshot
@@ -101,6 +102,10 @@ module BinData
     def method_missing(symbol, *args, &block) #:nodoc:
       child = snapshot
       if child.respond_to?(symbol)
+        self.class.class_eval \
+          "def #{symbol}(*args, &block);" \
+          "  snapshot.#{symbol}(*args, &block);" \
+          "end"
         child.__send__(symbol, *args, &block)
       else
         super
@@ -139,7 +144,7 @@ module BinData
     # method.  This indirection is so that #snapshot can be overridden in
     # subclasses to modify the presentation value.
     def _value
-      @value != nil ? @value : sensible_default()
+      @value != nil ? @value : sensible_default
     end
 
     # Logic for the :value parameter
@@ -174,17 +179,16 @@ module BinData
 
       def assert!
         current_value = snapshot
-        expected = eval_parameter(:assert, :value => current_value)
+        expected = eval_parameter(:assert, value: current_value)
 
-        msg = if not expected and current_value.nil?
-          "assertion failed"
-        elsif not expected
-          "value '#{current_value}' not as expected"
-        elsif expected != true and current_value != expected
-          "value is '#{current_value}' but expected '#{expected}'"
-        else
-          nil
-        end
+        msg =
+          if !expected
+            "value '#{current_value}' not as expected"
+          elsif expected != true && current_value != expected
+            "value is '#{current_value}' but expected '#{expected}'"
+          else
+            nil
+          end
 
         raise ValidityError, "#{msg} for #{debug_name}" if msg
       end
@@ -211,13 +215,10 @@ module BinData
       end
 
       def assert_value(current_value)
-        expected = eval_parameter(:asserted_value, :value => current_value)
-        if not expected
+        expected = eval_parameter(:asserted_value, value: current_value)
+        if current_value != expected
           raise ValidityError,
-                "value '#{current_value}' not as expected for #{debug_name}"
-        elsif current_value != expected and expected != true
-          raise ValidityError,
-                "value is '#{current_value}' but " +
+                "value is '#{current_value}' but " \
                 "expected '#{expected}' for #{debug_name}"
         end
       end

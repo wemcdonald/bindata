@@ -3,7 +3,7 @@ module BinData
   # lambdas in the context of this data object.  These lambdas
   # are those that are passed to data objects as parameters, e.g.:
   #
-  #    BinData::String.new(:value => lambda { %w{a test message}.join(" ") })
+  #    BinData::String.new(value: -> { %w(a test message).join(" ") })
   #
   # As a shortcut, :foo is the equivalent of lambda { foo }.
   #
@@ -29,7 +29,7 @@ module BinData
       @overrides = overrides if overrides
       if val.is_a? Symbol
         __send__(val)
-      elsif val.respond_to? :arity
+      elsif callable?(val)
         instance_exec(&val)
       else
         val
@@ -48,7 +48,7 @@ module BinData
     # Returns the index of this data object inside it's nearest container
     # array.
     def index
-      return @overrides[:index] if @overrides and @overrides.has_key?(:index)
+      return @overrides[:index] if defined?(@overrides) && @overrides.key?(:index)
 
       child = @obj
       parent = @obj.parent
@@ -63,7 +63,7 @@ module BinData
     end
 
     def method_missing(symbol, *args)
-      return @overrides[symbol] if defined? @overrides and @overrides.has_key?(symbol)
+      return @overrides[symbol] if defined?(@overrides) && @overrides.key?(symbol)
 
       if @obj.parent
         eval_symbol_in_parent_context(symbol, args)
@@ -95,11 +95,15 @@ module BinData
     def recursively_eval(val, args)
       if val.is_a?(Symbol)
         parent.__send__(val, *args)
-      elsif val.respond_to?(:arity)
+      elsif callable?(val)
         parent.instance_exec(&val)
       else
         val
       end
+    end
+
+    def callable?(obj)
+      Proc === obj || Method === obj || UnboundMethod === obj
     end
   end
 end

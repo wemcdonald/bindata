@@ -8,19 +8,19 @@ module BinData
   #
   #   require 'bindata'
   #
-  #   type1 = [:string, {:value => "Type1"}]
-  #   type2 = [:string, {:value => "Type2"}]
+  #   type1 = [:string, {value: "Type1"}]
+  #   type2 = [:string, {value: "Type2"}]
   #
   #   choices = {5 => type1, 17 => type2}
-  #   a = BinData::Choice.new(:choices => choices, :selection => 5)
+  #   a = BinData::Choice.new(choices: choices, selection: 5)
   #   a # => "Type1"
   #
   #   choices = [ type1, type2 ]
-  #   a = BinData::Choice.new(:choices => choices, :selection => 1)
+  #   a = BinData::Choice.new(choices: choices, selection: 1)
   #   a # => "Type2"
   #
   #   choices = [ nil, nil, nil, type1, nil, type2 ]
-  #   a = BinData::Choice.new(:choices => choices, :selection => 3)
+  #   a = BinData::Choice.new(choices: choices, selection: 3)
   #   a # => "Type1"
   #
   #
@@ -29,8 +29,8 @@ module BinData
   #   mychoice.choice = 'big'
   #
   #   choices = {'big' => :uint16be, 'little' => :uint16le}
-  #   a = BinData::Choice.new(:choices => choices, :copy_on_change => true,
-  #                           :selection => lambda { mychoice.choice })
+  #   a = BinData::Choice.new(choices: choices, copy_on_change: true,
+  #                           selection: -> { mychoice.choice })
   #   a.assign(256)
   #   a.to_binary_s #=> "\001\000"
   #
@@ -85,10 +85,6 @@ module BinData
       selection
     end
 
-    def safe_respond_to?(symbol, include_private = false) #:nodoc:
-      base_respond_to?(symbol, include_private)
-    end
-
     def respond_to?(symbol, include_private = false) #:nodoc:
       current_choice.respond_to?(symbol, include_private) || super
     end
@@ -98,7 +94,7 @@ module BinData
     end
 
     %w(clear? assign snapshot do_read do_write do_num_bytes).each do |m|
-      self.module_eval <<-END
+      module_eval <<-END
         def #{m}(*args)
           current_choice.#{m}(*args)
         end
@@ -126,10 +122,10 @@ module BinData
     def sanitize_parameters!(obj_class, params) #:nodoc:
       params.merge!(obj_class.dsl_params)
 
-      if params.needs_sanitizing?(:choices)
-        choices = choices_as_hash(params[:choices])
-        ensure_valid_keys(choices)
-        params[:choices] = params.create_sanitized_choices(choices)
+      params.sanitize_choices(:choices) do |choices|
+        hash_choices = choices_as_hash(choices)
+        ensure_valid_keys(hash_choices)
+        hash_choices
       end
     end
 
@@ -153,10 +149,10 @@ module BinData
     end
 
     def ensure_valid_keys(choices)
-      if choices.has_key?(nil)
+      if choices.key?(nil)
         raise ArgumentError, ":choices hash may not have nil key"
       end
-      if choices.keys.detect { |key| key.is_a?(Symbol) and key != :default }
+      if choices.keys.detect { |key| key.is_a?(Symbol) && key != :default }
         raise ArgumentError, ":choices hash may not have symbols for keys"
       end
     end
@@ -178,10 +174,8 @@ module BinData
     end
 
     def get_previous_choice(selection)
-      if selection != @last_selection and @last_selection != nil
+      if @last_selection && selection != @last_selection
         @choices[@last_selection]
-      else
-        nil
       end
     end
 

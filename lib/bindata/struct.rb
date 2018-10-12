@@ -16,10 +16,10 @@ module BinData
   #      int8  :z
   #    end
   #
-  #    obj = BinData::Struct.new(:hide => :a,
-  #                              :fields => [ [:int32le, :a],
-  #                                           [:int16le, :b],
-  #                                           [:tuple, :s] ])
+  #    obj = BinData::Struct.new(hide: :a,
+  #                              fields: [ [:int32le, :a],
+  #                                        [:int16le, :b],
+  #                                        [:tuple, :s] ])
   #    obj.field_names   =># [:b, :s]
   #
   #
@@ -42,6 +42,9 @@ module BinData
   # <tt>:endian</tt>::   Either :little or :big.  This specifies the default
   #                      endian of any numerics in this struct, or in any
   #                      nested data objects.
+  # <tt>:search_prefix</tt>::  Allows abbreviated type names.  If a type is
+  #                            unrecognised, then each prefix is applied until
+  #                            a match is found.
   #
   # == Field Parameters
   #
@@ -56,18 +59,23 @@ module BinData
     arg_processor :struct
 
     mandatory_parameter :fields
-    optional_parameters :endian, :hide
+    optional_parameters :endian, :search_prefix, :hide
 
     # These reserved words may not be used as field names
-    RESERVED = Hash[*
-                 (Hash.instance_methods +
-                  %w{alias and begin break case class def defined do else elsif
-                     end ensure false for if in module next nil not or redo
-                     rescue retry return self super then true undef unless until
-                     when while yield} +
-                  %w{array element index value} ).collect { |name| name.to_sym }.
-                  uniq.collect { |key| [key, true] }.flatten
-               ]
+    RESERVED =
+      Hash[*
+        (Hash.instance_methods +
+         %w{alias and begin break case class def defined do else elsif
+            end ensure false for if in module next nil not or redo
+            rescue retry return self super then true undef unless until
+            when while yield} +
+         %w{array element index value} +
+         %w{type initial_length read_until} +
+         %w{fields endian search_prefix hide only_if byte_align} +
+         %w{choices selection copy_on_change} +
+         %w{read_abs_offset struct_params}).collect(&:to_sym).
+         uniq.collect { |key| [key, true] }.flatten
+      ]
 
     def initialize_shared_instance
       fields = get_parameter(:fields)
@@ -78,7 +86,7 @@ module BinData
     end
 
     def initialize_instance
-      @field_objs  = []
+      @field_objs = []
     end
 
     def clear #:nodoc:
@@ -86,7 +94,7 @@ module BinData
     end
 
     def clear? #:nodoc:
-      @field_objs.all? { |f| f.nil? or f.clear? }
+      @field_objs.all? { |f| f.nil? || f.clear? }
     end
 
     def assign(val)
@@ -123,7 +131,7 @@ module BinData
     def offset_of(child) #:nodoc:
       instantiate_all_objs
       sum = sum_num_bytes_below_index(find_index_of(child))
-      child.do_num_bytes.is_a?(Integer) ? sum.ceil : sum.floor
+      child.bit_aligned? ? sum.floor : sum.ceil
     end
 
     def do_read(io) #:nodoc:
@@ -152,7 +160,7 @@ module BinData
       end
     end
 
-    def has_key?(key)
+    def key?(key)
       @field_names.index(base_field_name(key))
     end
 
@@ -221,7 +229,7 @@ module BinData
 
       @field_names.compact.each do |name|
         obj = find_obj_for_name(name)
-        if obj and src.has_key?(name)
+        if obj && src.key?(name)
           obj.assign(src[name])
         end
       end
@@ -256,7 +264,7 @@ module BinData
     end
 
     def include_obj?(obj)
-      not obj.has_parameter?(:onlyif) or obj.eval_parameter(:onlyif)
+      !obj.has_parameter?(:onlyif) || obj.eval_parameter(:onlyif)
     end
 
     # A hash that can be accessed via attributes.
@@ -266,11 +274,11 @@ module BinData
       end
 
       def respond_to?(symbol, include_private = false)
-        has_key?(symbol) || super
+        key?(symbol) || super
       end
 
       def method_missing(symbol, *args)
-        self[symbol] || super
+        key?(symbol) ? self[symbol] : super
       end
     end
   end
@@ -333,6 +341,7 @@ module BinData
   class StructArgProcessor < BaseArgProcessor
     def sanitize_parameters!(obj_class, params)
       sanitize_endian(params)
+      sanitize_search_prefix(params)
       sanitize_fields(obj_class, params)
       sanitize_hide(params)
     end
@@ -341,33 +350,38 @@ module BinData
     private
 
     def sanitize_endian(params)
-      if params.needs_sanitizing?(:endian)
-        endian = params.create_sanitized_endian(params[:endian])
-        params[:endian] = endian
-        params.endian   = endian # sync params[:endian] and params.endian
+      params.sanitize_endian(:endian)
+    end
+
+    def sanitize_search_prefix(params)
+      params.sanitize(:search_prefix) do |sprefix|
+        search_prefix = []
+        Array(sprefix).each do |prefix|
+          prefix = prefix.to_s.chomp("_")
+          search_prefix << prefix if prefix != ""
+        end
+
+        search_prefix
       end
     end
 
     def sanitize_fields(obj_class, params)
-      if params.needs_sanitizing?(:fields)
-        fields = params[:fields]
-
-        params[:fields] = params.create_sanitized_fields
+      params.sanitize_fields(:fields) do |fields, sanitized_fields|
         fields.each do |ftype, fname, fparams|
-          params[:fields].add_field(ftype, fname, fparams)
+          sanitized_fields.add_field(ftype, fname, fparams)
         end
 
-        field_names = sanitized_field_names(params[:fields])
+        field_names = sanitized_field_names(sanitized_fields)
         ensure_field_names_are_valid(obj_class, field_names)
       end
     end
 
     def sanitize_hide(params)
-      if params.needs_sanitizing?(:hide) and params.has_parameter?(:fields)
+      params.sanitize(:hide) do |hidden|
         field_names  = sanitized_field_names(params[:fields])
-        hfield_names = hidden_field_names(params[:hide])
+        hfield_names = hidden_field_names(hidden)
 
-        params[:hide] = (hfield_names & field_names)
+        hfield_names & field_names
       end
     end
 
@@ -376,7 +390,7 @@ module BinData
     end
 
     def hidden_field_names(hidden)
-      (hidden || []).collect { |h| h.to_sym }
+      (hidden || []).collect(&:to_sym)
     end
 
     def ensure_field_names_are_valid(obj_class, field_names)
@@ -384,15 +398,15 @@ module BinData
 
       field_names.each do |name|
         if obj_class.method_defined?(name)
-          raise NameError.new("Rename field '#{name}' in #{obj_class}, " +
+          raise NameError.new("Rename field '#{name}' in #{obj_class}, " \
                               "as it shadows an existing method.", name)
         end
         if reserved_names.include?(name)
-          raise NameError.new("Rename field '#{name}' in #{obj_class}, " +
+          raise NameError.new("Rename field '#{name}' in #{obj_class}, " \
                               "as it is a reserved name.", name)
         end
         if field_names.count(name) != 1
-          raise NameError.new("field '#{name}' in #{obj_class}, " +
+          raise NameError.new("field '#{name}' in #{obj_class}, " \
                               "is defined multiple times.", name)
         end
       end

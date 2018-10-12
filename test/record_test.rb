@@ -22,7 +22,7 @@ describe BinData::Record, "when defining with errors" do
   it "gives correct error message for non registered nested types" do
     lambda {
       class BadNestedTypeRecord < BinData::Record
-        array :a, :type => :non_registered_type
+        array :a, type: :non_registered_type
       end
     }.must_raise_on_line TypeError, 2, "unknown type 'non_registered_type' in BadNestedTypeRecord"
   end
@@ -91,15 +91,33 @@ describe BinData::Record, "when defining with errors" do
       end
     }.must_raise_on_line ArgumentError, 2, "unknown value for endian 'a bad value' in BadEndianRecord"
   end
+
+  it "fails when endian is after a field" do
+    lambda {
+      class BadEndianPosRecord < BinData::Record
+        string :a
+        endian :little
+      end
+    }.must_raise_on_line SyntaxError, 3, "endian must be called before defining fields in BadEndianPosRecord"
+  end
+
+  it "fails when search_prefix is after a field" do
+    lambda {
+      class BadSearchPrefixPosRecord < BinData::Record
+        string :a
+        search_prefix :pre
+      end
+    }.must_raise_on_line SyntaxError, 3, "search_prefix must be called before defining fields in BadSearchPrefixPosRecord"
+  end
 end
 
 describe BinData::Record, "with anonymous fields" do
   class AnonymousRecord < BinData::Record
-    int8 'a', :initial_value => 10
+    int8 'a', initial_value: 10
     int8 ''
     int8 nil
     int8
-    int8 :value => :a
+    int8 value: :a
   end
 
   let(:obj) { AnonymousRecord.new }
@@ -110,7 +128,7 @@ describe BinData::Record, "with anonymous fields" do
 
   it "does not include anonymous fields in snapshot" do
     obj.a = 5
-    obj.snapshot.must_equal({:a => 5})
+    obj.snapshot.must_equal({a: 5})
   end
 
   it "writes anonymous fields" do
@@ -125,9 +143,9 @@ describe BinData::Record, "with hidden fields" do
   class HiddenRecord < BinData::Record
     hide :b, :c
     int8 :a
-    int8 'b', :initial_value => 10
+    int8 'b', initial_value: 10
     int8 :c
-    int8 :d, :value => :b
+    int8 :d, value: :b
   end
 
   let(:obj) { HiddenRecord.new }
@@ -146,7 +164,7 @@ describe BinData::Record, "with hidden fields" do
 
   it "does not include hidden fields in snapshot" do
     obj.b = 5
-    obj.snapshot.must_equal({:a => 0, :d => 5})
+    obj.snapshot.must_equal({a: 0, d: 5})
   end
 end
 
@@ -156,7 +174,7 @@ describe BinData::Record, "with multiple fields" do
     int8 :b
   end
 
-  let(:obj) { MultiFieldRecord.new(:a => 1, :b => 2) }
+  let(:obj) { MultiFieldRecord.new(a: 1, b: 2) }
 
   it "returns num_bytes" do
     obj.a.num_bytes.must_equal 1
@@ -198,7 +216,7 @@ describe BinData::Record, "with multiple fields" do
     snap = obj.snapshot
     snap.a.must_equal 1
     snap.b.must_equal 2
-    snap.must_equal({ :a => 1, :b => 2 })
+    snap.must_equal({ a: 1, b: 2 })
   end
 
   it "returns field_names" do
@@ -212,14 +230,14 @@ end
 
 describe BinData::Record, "with nested structs" do
   class NestedStructRecord < BinData::Record
-    int8   :a, :initial_value => 6
-    struct :b, :the_val => :a do
+    int8   :a, initial_value: 6
+    struct :b, the_val: :a do
       hide :w
-      int8 :w, :initial_value => 3
-      int8 :x, :value => :the_val
+      int8 :w, initial_value: 3
+      int8 :x, value: :the_val
     end
     struct :c do
-      int8 :y, :value => lambda { b.w }
+      int8 :y, value: -> { b.w }
       int8 :z
     end
   end
@@ -258,7 +276,7 @@ describe BinData::Record, "with nested structs" do
   end
 
   it "assigns nested fields" do
-    obj.assign(:a => 2, :b => {:w => 4})
+    obj.assign(a: 2, b: {w: 4})
     obj.a.must_equal   2
     obj.b.w.must_equal 4
     obj.b.x.must_equal 2
@@ -268,15 +286,15 @@ end
 
 describe BinData::Record, "with nested array of primitives" do
   class NestedPrimitiveArrayRecord < BinData::Record
-    array :a, :initial_length => 3 do
-      uint8 :value => lambda { index }
+    array :a, initial_length: 3 do
+      uint8 value: -> { index }
     end
   end
 
   let(:obj) { NestedPrimitiveArrayRecord.new }
 
   it "uses block as :type" do
-    obj.snapshot.must_equal({:a => [0, 1, 2]})
+    obj.snapshot.must_equal({a: [0, 1, 2]})
   end
 end
 
@@ -292,15 +310,15 @@ describe BinData::Record, "with nested array of structs" do
 
   it "uses block as struct for :type" do
     obj.a[0].b = 2
-    obj.snapshot.must_equal({:a => [{:b => 2, :c => 0}]})
+    obj.snapshot.must_equal({a: [{b: 2, c: 0}]})
   end
 end
 
 describe BinData::Record, "with nested choice with implied keys" do
   class NestedChoiceWithImpliedKeysRecord < BinData::Record
-    choice :a, :selection => 1 do
-      uint8 :value => 1
-      uint8 :value => 2
+    choice :a, selection: 1 do
+      uint8 value: 1
+      uint8 value: 2
     end
   end
 
@@ -311,9 +329,9 @@ end
 
 describe BinData::Record, "with nested choice with explicit keys" do
   class NestedChoiceWithKeysRecord < BinData::Record
-    choice :a, :selection => 5 do
-      uint8 3, :value => 1
-      uint8 5, :value => 2
+    choice :a, selection: 5 do
+      uint8 3, value: 1
+      uint8 5, value: 2
     end
   end
 
@@ -324,9 +342,9 @@ end
 
 describe BinData::Record, "with nested choice with names" do
   class NestedChoiceWithNamesRecord < BinData::Record
-    choice :a, :selection => "b" do
-      uint8 "b", :value => 1
-      uint8 "c", :value => 2
+    choice :a, selection: "b" do
+      uint8 "b", value: 1
+      uint8 "c", value: 2
     end
   end
 
@@ -341,10 +359,10 @@ describe BinData::Record, "with an endian defined" do
 
     uint16 :a
     float  :b
-    array  :c, :initial_length => 2 do
+    array  :c, initial_length: 2 do
       int8
     end
-    choice :d, :selection => 1 do
+    choice :d, selection: 1 do
       uint16
       uint32
     end
@@ -378,10 +396,63 @@ describe BinData::Record, "with an endian defined" do
   end
 end
 
+describe BinData::Record, "with search_prefix" do
+  class ASprefix < BinData::Int8; end
+  class BSprefix < BinData::Int8; end
+
+  class RecordWithSearchPrefix < BinData::Record
+    search_prefix :a
+    sprefix :f
+  end
+
+  class RecordWithParentSearchPrefix < BinData::Record
+    search_prefix :a
+    struct :s do
+      sprefix :f
+    end
+  end
+
+  class RecordWithNestedSearchPrefix < BinData::Record
+    search_prefix :a
+    struct :s do
+      search_prefix :x
+      sprefix :f
+    end
+  end
+
+  class RecordWithPrioritisedNestedSearchPrefix < BinData::Record
+    search_prefix :b
+    struct :s do
+      search_prefix :a
+      sprefix :f
+    end
+  end
+
+  it "uses search_prefix" do
+    obj = RecordWithSearchPrefix.new
+    obj.f.class.name.must_equal "ASprefix"
+  end
+
+  it "uses parent search_prefix" do
+    obj = RecordWithParentSearchPrefix.new
+    obj.s.f.class.name.must_equal "ASprefix"
+  end
+
+  it "uses nested search_prefix" do
+    obj = RecordWithNestedSearchPrefix.new
+    obj.s.f.class.name.must_equal "ASprefix"
+  end
+
+  it "uses prioritised nested search_prefix" do
+    obj = RecordWithPrioritisedNestedSearchPrefix.new
+    obj.s.f.class.name.must_equal "ASprefix"
+  end
+end
+
 describe BinData::Record, "with endian :big_and_little" do
   class RecordWithBnLEndian < BinData::Record
     endian :big_and_little
-    int16 :a, :value => 1
+    int16 :a, value: 1
   end
 
   it "is not registered" do
@@ -407,7 +478,28 @@ describe BinData::Record, "with endian :big_and_little" do
   end
 
   it "accepts :endian as argument" do
-    obj = RecordWithBnLEndian.new(:endian => :little)
+    obj = RecordWithBnLEndian.new(endian: :little)
+    obj.to_binary_s.must_equal_binary "\x01\x00"
+  end
+end
+
+describe BinData::Record, "with endian :big_and_little and search_prefix" do
+  class NsBNLIntBe < BinData::Int16be; end
+  class NsBNLIntLe < BinData::Int16le; end
+
+  class RecordWithBnLEndianAndSearchPrefix < BinData::Record
+    endian :big_and_little
+    search_prefix :ns
+     bnl_int :a, value: 1
+  end
+
+  it "creates big endian version" do
+    obj = RecordWithBnLEndianAndSearchPrefixBe.new
+    obj.to_binary_s.must_equal_binary "\x00\x01"
+  end
+
+  it "creates little endian version" do
+    obj = RecordWithBnLEndianAndSearchPrefixLe.new
     obj.to_binary_s.must_equal_binary "\x01\x00"
   end
 end
@@ -415,10 +507,10 @@ end
 describe BinData::Record, "with endian :big_and_little when subclassed" do
   class ARecordWithBnLEndian < BinData::Record
     endian :big_and_little
-    int16 :a, :value => 1
+    int16 :a, value: 1
   end
   class BRecordWithBnLEndian < ARecordWithBnLEndian
-    int16 :b, :value => 2
+    int16 :b, value: 2
   end
 
   it "is not registered" do
@@ -444,7 +536,7 @@ describe BinData::Record, "with endian :big_and_little when subclassed" do
   end
 
   it "accepts :endian as argument" do
-    obj = BRecordWithBnLEndian.new(:endian => :little)
+    obj = BRecordWithBnLEndian.new(endian: :little)
     obj.to_binary_s.must_equal_binary "\x01\x00\x02\x00"
   end
 end
@@ -453,12 +545,12 @@ describe BinData::Record, "defined recursively" do
   class RecursiveRecord < BinData::Record
     endian  :big
     uint16  :val
-    uint8   :has_nxt, :value => lambda { nxt.clear? ? 0 : 1 }
-    recursive_record :nxt, :onlyif => lambda { has_nxt > 0 }
+    uint8   :has_nxt, value: -> { nxt.clear? ? 0 : 1 }
+    recursive_record :nxt, onlyif: -> { has_nxt > 0 }
   end
 
   it "can be created" do
-    obj = RecursiveRecord.new
+    RecursiveRecord.new
   end
 
   it "reads" do
@@ -489,7 +581,7 @@ describe BinData::Record, "with custom mandatory parameters" do
   class MandatoryRecord < BinData::Record
     mandatory_parameter :arg1
 
-    uint8 :a, :value => :arg1
+    uint8 :a, value: :arg1
   end
 
   it "raises error if mandatory parameter is not supplied" do
@@ -497,16 +589,16 @@ describe BinData::Record, "with custom mandatory parameters" do
   end
 
   it "uses mandatory parameter" do
-    obj = MandatoryRecord.new(:arg1 => 5)
+    obj = MandatoryRecord.new(arg1: 5)
     obj.a.must_equal 5
   end
 end
 
 describe BinData::Record, "with custom default parameters" do
   class DefaultRecord < BinData::Record
-    default_parameter :arg1 => 5
+    default_parameter arg1: 5
 
-    uint8 :a, :value => :arg1
+    uint8 :a, value: :arg1
     uint8 :b
   end
 
@@ -516,17 +608,17 @@ describe BinData::Record, "with custom default parameters" do
   end
 
   it "overrides default parameter" do
-    obj = DefaultRecord.new(:arg1 => 7)
+    obj = DefaultRecord.new(arg1: 7)
     obj.a.must_equal 7
   end
 
   it "accepts values" do
-    obj = DefaultRecord.new(:b => 2)
+    obj = DefaultRecord.new(b: 2)
     obj.b.must_equal 2
   end
 
   it "accepts values and parameters" do
-    obj = DefaultRecord.new({:b => 2}, :arg1 => 3)
+    obj = DefaultRecord.new({b: 2}, arg1: 3)
     obj.a.must_equal 3
     obj.b.must_equal 2
   end
@@ -534,16 +626,16 @@ end
 
 describe BinData::Record, "with :onlyif" do
   class OnlyIfRecord < BinData::Record
-    uint8 :a, :initial_value => 3
-    uint8 :b, :initial_value => 5, :onlyif => lambda { a == 3 }
-    uint8 :c, :initial_value => 7, :onlyif => lambda { a != 3 }
+    uint8 :a, initial_value: 3
+    uint8 :b, initial_value: 5, onlyif: -> { a == 3 }
+    uint8 :c, initial_value: 7, onlyif: -> { a != 3 }
   end
 
   let(:obj) { OnlyIfRecord.new }
 
   it "initial state" do
     obj.num_bytes.must_equal 2
-    obj.snapshot.must_equal({:a => 3, :b => 5})
+    obj.snapshot.must_equal({a: 3, b: 5})
     obj.to_binary_s.must_equal_binary "\x03\x05"
   end
 
@@ -555,7 +647,7 @@ describe BinData::Record, "with :onlyif" do
 
   it "reads as lambdaed" do
     obj.read("\x01\x02")
-    obj.snapshot.must_equal({:a => 1, :c => 2})
+    obj.snapshot.must_equal({a: 1, c: 2})
   end
 end
 

@@ -61,12 +61,12 @@ describe BinData::Base, "ArgExtractor" do
   it "parses parameters" do
     par = BinData::Base.new
     data = [
-      [[3                ],  3,   [],   nil],
-      [[3,            par],  3,   [],   par],
-      [[   {:a => 1}     ],  nil, [:a], nil],
-      [[   {:a => 1}, par],  nil, [:a], par],
-      [[3, {:a => 1}     ],  3,   [:a], nil],
-      [[3, {:a => 1}, par],  3,   [:a], par],
+      [[3             ],  3,   [],   nil],
+      [[3,         par],  3,   [],   par],
+      [[   {a: 1}     ],  nil, [:a], nil],
+      [[   {a: 1}, par],  nil, [:a], par],
+      [[3, {a: 1}     ],  3,   [:a], nil],
+      [[3, {a: 1}, par],  3,   [:a], par],
     ]
 
     data.each do |el|
@@ -83,8 +83,8 @@ describe BinData::Base do
   class BaseStub < BinData::Base
     # Override to avoid NotImplemented errors
     def clear?; end
-    def assign(x); @data = x; end
-    def snapshot; @data; end
+    def assign(x); end
+    def snapshot; end
     def do_read(io) end
     def do_write(io) end
     def do_num_bytes; end
@@ -106,6 +106,12 @@ describe BinData::Base do
 
   it "#write returns self" do
     obj.write("").must_equal obj
+  end
+
+  it "#to_hex uses #to_binary_s representation" do
+    obj.stub :to_binary_s, "\x01\xab\xCD" do
+      obj.to_hex.must_equal "01abcd"
+    end
   end
 
   it "#inspect is forwarded to snapshot" do

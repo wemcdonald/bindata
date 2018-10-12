@@ -1,3 +1,4 @@
+require 'thread'
 require 'bindata/base_primitive'
 
 module BinData
@@ -5,14 +6,18 @@ module BinData
   # The integer is defined by endian and number of bits.
 
   module BitField #:nodoc: all
+    @@mutex = Mutex.new
+
     class << self
       def define_class(name, nbits, endian, signed = :unsigned)
-        unless BinData.const_defined?(name)
-          BinData.module_eval <<-END
-            class #{name} < BinData::BasePrimitive
-              BitField.define_methods(self, #{nbits.inspect}, #{endian.inspect}, #{signed.inspect})
-            end
-          END
+        @@mutex.synchronize do
+          unless BinData.const_defined?(name)
+            new_class = Class.new(BinData::BasePrimitive)
+            BitField.define_methods(new_class, nbits, endian.to_sym, signed.to_sym)
+            RegisteredClasses.register(name, new_class)
+
+            BinData.const_set(name, new_class)
+          end
         end
 
         BinData.const_get(name)
@@ -45,9 +50,12 @@ module BinData
             value == 1
           end
 
+          def bit_aligned?
+            true
+          end
+
           #---------------
           private
-
 
           def read_and_return_value(io)
             #{create_nbits_code(nbits)}
@@ -88,13 +96,13 @@ module BinData
 
       def create_clamp_code(nbits, signed)
         if nbits == :nbits
-          create_dynamic_clamp_code(nbits, signed)
+          create_dynamic_clamp_code(signed)
         else
           create_fixed_clamp_code(nbits, signed)
         end
       end
 
-      def create_dynamic_clamp_code(nbits, signed)
+      def create_dynamic_clamp_code(signed)
         if signed == :signed
           max = "max = (1 << (nbits - 1)) - 1"
           min = "min = -(max + 1)"
@@ -107,7 +115,7 @@ module BinData
       end
 
       def create_fixed_clamp_code(nbits, signed)
-        if nbits == 1 and signed == :signed
+        if nbits == 1 && signed == :signed
           raise "signed bitfield must have more than one bit"
         end
 

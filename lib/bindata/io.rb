@@ -4,6 +4,213 @@ module BinData
   # A wrapper around an IO object.  The wrapper provides a consistent
   # interface for BinData objects to use when accessing the IO.
   module IO
+
+    # Common operations for both Read and Write.
+    module Common
+      def initialize(io)
+        if self.class === io
+          raise ArgumentError, "io must not be a #{self.class}"
+        end
+
+        # wrap strings in a StringIO
+        if io.respond_to?(:to_str)
+          io = BinData::IO.create_string_io(io.to_str)
+        end
+
+        @raw_io = io
+        @buffer_end_points = nil
+
+        extend seekable? ? SeekableStream : UnSeekableStream
+        stream_init
+      end
+
+      #-------------
+      private
+
+      def seekable?
+        @raw_io.pos
+      rescue NoMethodError, Errno::ESPIPE, Errno::EPIPE, Errno::EINVAL
+        nil
+      end
+
+      def seek(n)
+        seek_raw(buffer_limited_n(n))
+      end
+
+      def buffer_limited_n(n)
+        if @buffer_end_points
+          if n.nil? || n > 0
+            max = @buffer_end_points[1] - offset
+            n = max if n.nil? || n > max
+          else
+            min = @buffer_end_points[0] - offset
+            n = min if n < min
+          end
+        end
+
+        n
+      end
+
+      def with_buffer_common(n)
+        prev = @buffer_end_points
+        if prev
+          avail = prev[1] - offset
+          n = avail if n > avail
+        end
+        @buffer_end_points = [offset, offset + n]
+        begin
+          yield(*@buffer_end_points)
+        ensure
+          @buffer_end_points = prev
+        end
+      end
+
+      # Use #seek and #pos on seekable streams
+      module SeekableStream
+        # The number of bytes remaining in the input stream.
+        def num_bytes_remaining
+          start_mark = @raw_io.pos
+          @raw_io.seek(0, ::IO::SEEK_END)
+          end_mark = @raw_io.pos
+
+          if @buffer_end_points
+            if @buffer_end_points[1] < end_mark
+              end_mark = @buffer_end_points[1]
+            end
+          end
+
+          bytes_remaining = end_mark - start_mark
+          @raw_io.seek(start_mark, ::IO::SEEK_SET)
+
+          bytes_remaining
+        end
+
+        # All io calls in +block+ are rolled back after this
+        # method completes.
+        def with_readahead
+          mark = @raw_io.pos
+          begin
+            yield
+          ensure
+            @raw_io.seek(mark, ::IO::SEEK_SET)
+          end
+        end
+
+        #-----------
+        private
+
+        def stream_init
+          @initial_pos = @raw_io.pos
+        end
+
+        def offset_raw
+          @raw_io.pos - @initial_pos
+        end
+
+        def seek_raw(n)
+          @raw_io.seek(n, ::IO::SEEK_CUR)
+        end
+
+        def read_raw(n)
+          @raw_io.read(n)
+        end
+
+        def write_raw(data)
+          @raw_io.write(data)
+        end
+      end
+
+      # Manually keep track of offset for unseekable streams.
+      module UnSeekableStream
+        def offset_raw
+          @offset
+        end
+
+        # The number of bytes remaining in the input stream.
+        def num_bytes_remaining
+          raise IOError, "stream is unseekable"
+        end
+
+        # All io calls in +block+ are rolled back after this
+        # method completes.
+        def with_readahead
+          mark = @offset
+          @read_data = ""
+          @in_readahead = true
+
+          class << self
+            alias_method :read_raw_without_readahead, :read_raw
+            alias_method :read_raw, :read_raw_with_readahead
+          end
+
+          begin
+            yield
+          ensure
+            @offset = mark
+            @in_readahead = false
+          end
+        end
+
+        #-----------
+        private
+
+        def stream_init
+          @offset = 0
+        end
+
+        def read_raw(n)
+          data = @raw_io.read(n)
+          @offset += data.size if data
+          data
+        end
+
+        def read_raw_with_readahead(n)
+          data = ""
+
+          unless @read_data.empty? || @in_readahead
+            bytes_to_consume = [n, @read_data.length].min
+            data << @read_data.slice!(0, bytes_to_consume)
+            n -= bytes_to_consume
+
+            if @read_data.empty?
+              class << self
+                alias_method :read_raw, :read_raw_without_readahead
+              end
+            end
+          end
+
+          raw_data = @raw_io.read(n)
+          data << raw_data if raw_data
+
+          if @in_readahead
+            @read_data << data
+          end
+
+          @offset += data.size
+
+          data
+        end
+
+        def write_raw(data)
+          @offset += data.size
+          @raw_io.write(data)
+        end
+
+        def seek_raw(n)
+          raise IOError, "stream is unseekable" if n < 0
+
+          # NOTE: how do we seek on a writable stream?
+
+          # skip over data in 8k blocks
+          while n > 0
+            bytes_to_read = [n, 8192].min
+            read_raw(bytes_to_read)
+            n -= bytes_to_read
+          end
+        end
+      end
+    end
+
     # Creates a StringIO around +str+.
     def self.create_string_io(str = "")
       StringIO.new(str.dup.force_encoding(Encoding::BINARY))
@@ -27,41 +234,30 @@ module BinData
     #   readbits(6), readbits(5) #=> [543210, a9876]
     #
     class Read
+      include Common
+
       def initialize(io)
-        raise ArgumentError, "io must not be a BinData::IO::Read" if BinData::IO::Read === io
-
-        # wrap strings in a StringIO
-        if io.respond_to?(:to_str)
-          io = BinData::IO.create_string_io(io.to_str)
-        end
-
-        @raw_io = io
+        super(io)
 
         # bits when reading
         @rnbits  = 0
         @rval    = 0
         @rendian = nil
-
-        @buffer_end_pos = nil
-
-        extend seekable? ? SeekableStream : UnSeekableStream
       end
 
       # Sets a buffer of +n+ bytes on the io stream.  Any reading or seeking
       # calls inside the +block+ will be contained within this buffer.
-      def with_buffer(n, &block)
-        prev = @buffer_end_pos
-        if prev
-          avail = prev - offset
-          n = avail if n > avail
-        end
-        @buffer_end_pos = offset + n
-        begin
-          block.call
+      def with_buffer(n)
+        with_buffer_common(n) do
+          yield
           read
-        ensure
-          @buffer_end_pos = prev
         end
+      end
+
+      # Returns the current offset of the io stream.  Offset will be rounded
+      # up when reading bitfields.
+      def offset
+        offset_raw
       end
 
       # Seek +n+ bytes from the current position in the io stream.
@@ -77,11 +273,7 @@ module BinData
       # If the data read is too short an IOError is raised.
       def readbytes(n)
         reset_read_bits
-
-        str = read(n)
-        raise EOFError, "End of file reached" if str.nil?
-        raise IOError, "data truncated" if str.size < n
-        str
+        read(n)
       end
 
       # Reads all remaining bytes from the stream.
@@ -116,27 +308,13 @@ module BinData
       #---------------
       private
 
-      def seekable?
-        @raw_io.pos
-      rescue NoMethodError, Errno::ESPIPE, Errno::EPIPE
-        nil
-      end
-
-      def seek(n)
-        seek_raw(buffer_limited_n(n))
-      end
-
       def read(n = nil)
-        read_raw(buffer_limited_n(n))
-      end
-
-      def buffer_limited_n(n)
-        if @buffer_end_pos
-          max = @buffer_end_pos - offset
-          n = max if n.nil? or n > max
+        str = read_raw(buffer_limited_n(n))
+        if n
+          raise EOFError, "End of file reached" if str.nil?
+          raise IOError, "data truncated" if str.size < n
         end
-
-        n
+        str
       end
 
       def read_big_endian_bits(nbits)
@@ -152,10 +330,7 @@ module BinData
       end
 
       def accumulate_big_endian_bits
-        byte = read(1)
-        raise EOFError, "End of file reached" if byte.nil?
-        byte = byte.unpack('C').at(0) & 0xff
-
+        byte = read(1).unpack('C').at(0) & 0xff
         @rval = (@rval << 8) | byte
         @rnbits += 8
       end
@@ -173,87 +348,13 @@ module BinData
       end
 
       def accumulate_little_endian_bits
-        byte = read(1)
-        raise EOFError, "End of file reached" if byte.nil?
-        byte = byte.unpack('C').at(0) & 0xff
-
+        byte = read(1).unpack('C').at(0) & 0xff
         @rval = @rval | (byte << @rnbits)
         @rnbits += 8
       end
 
       def mask(nbits)
         (1 << nbits) - 1
-      end
-
-      # Use #seek and #pos on seekable streams
-      module SeekableStream
-        # Returns the current offset of the io stream.  Offset will be rounded
-        # up when reading bitfields.
-        def offset
-          raw_io.pos - @initial_pos
-        end
-
-        # The number of bytes remaining in the input stream.
-        def num_bytes_remaining
-          mark = raw_io.pos
-          raw_io.seek(0, ::IO::SEEK_END)
-          bytes_remaining = raw_io.pos - mark
-          raw_io.seek(mark, ::IO::SEEK_SET)
-
-          bytes_remaining
-        end
-
-        #-----------
-        private
-
-        def read_raw(n)
-          raw_io.read(n)
-        end
-
-        def seek_raw(n)
-          raw_io.seek(n, ::IO::SEEK_CUR)
-        end
-
-        def raw_io
-          @initial_pos ||= @raw_io.pos
-          @raw_io
-        end
-      end
-
-      # Manually keep track of offset for unseekable streams.
-      module UnSeekableStream
-        # Returns the current offset of the io stream.  Offset will be rounded
-        # up when reading bitfields.
-        def offset
-          @read_count ||= 0
-        end
-
-        # The number of bytes remaining in the input stream.
-        def num_bytes_remaining
-          raise IOError, "stream is unseekable"
-        end
-
-        #-----------
-        private
-
-        def read_raw(n)
-          @read_count ||= 0
-
-          data = @raw_io.read(n)
-          @read_count += data.size if data
-          data
-        end
-
-        def seek_raw(n)
-          raise IOError, "stream is unseekable" if n < 0
-
-          # skip over data in 8k blocks
-          while n > 0
-            bytes_to_read = [n, 8192].min
-            read_raw(bytes_to_read)
-            n -= bytes_to_read
-          end
-        end
       end
     end
 
@@ -265,57 +366,42 @@ module BinData
     #
     # See IO::Read for more information.
     class Write
+      include Common
       def initialize(io)
-        if BinData::IO::Write === io
-          raise ArgumentError, "io must not be a BinData::IO::Write"
-        end
-
-        # wrap strings in a StringIO
-        if io.respond_to?(:to_str)
-          io = BinData::IO.create_string_io(io.to_str)
-        end
-
-        @raw_io = io
+        super(io)
 
         @wnbits  = 0
         @wval    = 0
         @wendian = nil
-
-        @write_count = 0
-
-        @bytes_remaining = nil
       end
 
       # Sets a buffer of +n+ bytes on the io stream.  Any writes inside the
       # +block+ will be contained within this buffer.  If less than +n+ bytes
       # are written inside the block, the remainder will be padded with '\0'
       # bytes.
-      def with_buffer(n, &block)
-        prev = @bytes_remaining
-        if prev
-          n = prev if n > prev
-          prev -= n
-        end
-
-        @bytes_remaining = n
-        begin
-          block.call
-          write_raw("\0" * @bytes_remaining)
-        ensure
-          @bytes_remaining = prev
+      def with_buffer(n)
+        with_buffer_common(n) do |_buf_start, buf_end|
+          yield
+          write("\0" * (buf_end - offset))
         end
       end
 
       # Returns the current offset of the io stream.  Offset will be rounded
       # up when writing bitfields.
       def offset
-        @write_count + (@wnbits > 0 ? 1 : 0)
+        offset_raw + (@wnbits > 0 ? 1 : 0)
+      end
+
+      # Seek +n+ bytes from the current position in the io stream.
+      def seekbytes(n)
+        flushbits
+        seek(n)
       end
 
       # Writes the given string of bytes to the io stream.
       def writebytes(str)
         flushbits
-        write_raw(str)
+        write(str)
       end
 
       # Writes +nbits+ bits from +val+ to the stream. +endian+ specifies whether
@@ -344,10 +430,19 @@ module BinData
           writebits(0, 8 - @wnbits, @wendian)
         end
       end
-      alias_method :flush, :flushbits
+      alias flush flushbits
 
       #---------------
       private
+
+      def write(data)
+        n = buffer_limited_n(data.size)
+        if n < data.size
+          data = data[0, n]
+        end
+
+        write_raw(data)
+      end
 
       def write_big_endian_bits(val, nbits)
         while nbits > 0
@@ -358,7 +453,7 @@ module BinData
             val &= mask(nbits)
 
             @wval   = (@wval << bits_req) | msb_bits
-            write_raw(@wval.chr)
+            write(@wval.chr)
 
             @wval   = 0
             @wnbits = 0
@@ -379,7 +474,7 @@ module BinData
             val >>= bits_req
 
             @wval   = @wval | (lsb_bits << @wnbits)
-            write_raw(@wval.chr)
+            write(@wval.chr)
 
             @wval   = 0
             @wnbits = 0
@@ -389,18 +484,6 @@ module BinData
             nbits = 0
           end
         end
-      end
-
-      def write_raw(data)
-        if @bytes_remaining
-          if data.size > @bytes_remaining
-            data = data[0, @bytes_remaining]
-          end
-          @bytes_remaining -= data.size
-        end
-
-        @write_count += data.size
-        @raw_io.write(data)
       end
 
       def mask(nbits)

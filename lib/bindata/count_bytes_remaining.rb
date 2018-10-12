@@ -9,14 +9,13 @@ module BinData
   #
   #   class A < BinData::Record
   #     count_bytes_remaining :bytes_remaining
-  #     string :all_data, :read_length => :bytes_remaining
+  #     string :all_data, read_length: :bytes_remaining
   #   end
   #
   #   obj = A.read("abcdefghij")
   #   obj.all_data #=> "abcdefghij"
   #
   class CountBytesRemaining < BinData::BasePrimitive
-
     #---------------
     private
 

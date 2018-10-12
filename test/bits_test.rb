@@ -109,7 +109,7 @@ def generate_bit_classes_to_test(endian, signed)
   (start .. 64).each do |nbits|
     name = "#{base}"
     name << "Le" if endian == :little
-    obj = BinData.const_get(name).new(:nbits => nbits)
+    obj = BinData.const_get(name).new(nbits: nbits)
     bits << [obj, nbits]
   end
 
@@ -235,6 +235,15 @@ describe "Bits of size 1" do
         obj.to_bool.must_equal false
       end
     end
+  end
 
+  it "must not be signed" do
+    lambda {
+      BinData::Sbit1
+    }.must_raise RuntimeError
+
+    lambda {
+      BinData::Sbit1le
+    }.must_raise RuntimeError
   end
 end

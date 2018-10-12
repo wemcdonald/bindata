@@ -1,4 +1,13 @@
 module BinData
+  # WARNING: THIS IS UNSUPPORTED!!
+  #
+  # This was a (failed) experimental feature that allowed seeking within the
+  # input stream.  It remains here for backwards compatability for the few
+  # people that used it.
+  #
+  # The official way to skip around the stream is to use BinData::Skip with
+  # the `:to_abs_offset` parameter.
+  #
   # == Parameters
   #
   # Parameters may be provided at initialisation to control the behaviour of
@@ -39,11 +48,11 @@ module BinData
 
       def check_offset(io)
         actual_offset = io.offset
-        expected = eval_parameter(:check_offset, :offset => actual_offset)
+        expected = eval_parameter(:check_offset, offset: actual_offset)
 
-        if not expected
+        if !expected
           raise ValidityError, "offset not as expected for #{debug_name}"
-        elsif actual_offset != expected and expected != true
+        elsif actual_offset != expected && expected != true
           raise ValidityError,
                 "offset is '#{actual_offset}' but " +
                 "expected '#{expected}' for #{debug_name}"
@@ -76,5 +85,10 @@ module BinData
         end
       end
     end
+  end
+
+  # Add these offset options to Base
+  class Base
+    include CheckOrAdjustOffsetPlugin
   end
 end

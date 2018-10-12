@@ -11,7 +11,6 @@ Gem::Specification.new do |s|
   s.homepage = 'http://github.com/dmendel/bindata'
   s.rubyforge_project = 'bindata'
   s.require_path = 'lib'
-  s.has_rdoc = true
   s.extra_rdoc_files = ['NEWS.rdoc']
   s.rdoc_options << '--main' << 'NEWS.rdoc'
   s.files = `git ls-files`.split("\n")

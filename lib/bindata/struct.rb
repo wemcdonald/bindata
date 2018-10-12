@@ -70,7 +70,7 @@ module BinData
             rescue retry return self super then true undef unless until
             when while yield} +
          %w{array element index value} +
-         %w{type initial_length read_until} +
+         %w{initial_length read_until} +
          %w{fields endian search_prefix hide only_if byte_align} +
          %w{choices selection copy_on_change} +
          %w{read_abs_offset struct_params}).collect(&:to_sym).
